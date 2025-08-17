@@ -9,8 +9,6 @@ from src.helper import (
 )
 from pinecone import Pinecone
 from pinecone import ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
-
 
 load_dotenv()
 
