@@ -16,7 +16,7 @@ function ChatMessage({ message }) {
         <Avatar
           src="/labassistant.avif" // Updated path
           alt="Medical Lab Assistant Avatar"
-          sx={{ mr: 1, width: 48, height: 48 }} // Slightly bigger avatars
+          sx={{ mr: 1, width: 48, height: 48 }}
         />
       )}
       <ListItemText
