@@ -6,7 +6,7 @@ import MessageInput from './MessageInput';
 function ChatContainer() {
   const [messages, setMessages] = useState([
     {
-      text: "Hello! I am your Medical Lab Assistant. I can provide information about medical laboratory equipment, procedures, and diagnostics based on the provided documentation. Ask me anything related to these topics!",
+      text: "Hello! I am your Medical Lab Assistant. I can provide information about medical laboratory equipment, procedures, and troubleshooting steps based on the provided documentation. Ask me anything related to these topics!",
       time: new Date().getHours() + ":" + new Date().getMinutes(),
       sender: 'bot' // Keep sender as 'bot' for internal logic/styling
     }
