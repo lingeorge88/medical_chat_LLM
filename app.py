@@ -1,4 +1,5 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, send_from_directory, request
+from flask_cors import CORS
 from src.helper import download_embeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import ChatOpenAI
@@ -10,7 +11,8 @@ from src.prompt import *
 import os
 
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend/build', static_url_path='')
+CORS(app)
 
 
 load_dotenv()
@@ -45,9 +47,9 @@ question_answer_chain = create_stuff_documents_chain(chatModel, prompt)
 rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
 
-@app.route("/")
+@app.route('/')
 def index():
-    return render_template("chat.html")
+    return send_from_directory(app.static_folder, 'index.html')
 
 
 @app.route("/get", methods=["GET", "POST"])
