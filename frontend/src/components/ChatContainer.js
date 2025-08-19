@@ -14,6 +14,9 @@ function ChatContainer() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Use environment variable for API URL
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (input.trim() === '') return;
@@ -34,7 +37,7 @@ function ChatContainer() {
     setLoading(true); // Set loading to true before API call
 
     try {
-      const response = await fetch('http://localhost:8080/get', {
+      const response = await fetch(`${API_URL}/get`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
