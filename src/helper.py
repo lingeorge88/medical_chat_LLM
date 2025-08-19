@@ -1,6 +1,6 @@
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings
 from typing import List
 from langchain.schema import Document
 import os
@@ -38,7 +38,7 @@ def text_split(extracted_data):
 
 # Download the Embeddings from OpenAI
 def download_embeddings():
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-ada-002", openai_api_key=os.environ.get("OPENAI_API_KEY")
-    )
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )  # this model return 384 dimensions
     return embeddings
