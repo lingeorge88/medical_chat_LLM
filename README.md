@@ -22,6 +22,35 @@ This project implements a Retrieval-Augmented Generation (RAG) system that:
 3. **Intelligent Responses**: Generates human-like answers that synthesize information from multiple sources
 4. **Continuous Learning**: Can be updated with new documentation without retraining the entire system
 
+## Architecture
+
+```mermaid
+graph TD
+    A[Information Storage <br/>(PDF Documents)] --> B(Chunking);
+    B --> C{Transformers <br/>(Sentence Embeddings)};
+    C --> D[Vector Database <br/>(Pinecone)];
+    E[User Query] --> F{Transformers <br/>(Sentence Embeddings)};
+    F --> G(Similarity Search);
+    D -- Retrieved Context --> G;
+    G --> H[LLM <br/>(OpenAI GPT)];
+    E -- Original Query --> H;
+    H --> I[Generated Response];
+```
+
+1.  **Information Storage (PDF Documents)**: The process begins with storing the knowledge base, which consists of PDF documents, in the `data/` directory. The `PyPDFLoader` from LangChain is used to load these documents into memory.
+
+2.  **Chunking**: The loaded documents are then broken down into smaller, manageable chunks. This is achieved using LangChain's `RecursiveCharacterTextSplitter`, which splits the text to ensure that no single chunk is too large for the model's context window, while maintaining semantic coherence.
+
+3.  **Transformers (Sentence Embeddings)**: Each text chunk is converted into a numerical vector representation (embedding). This project uses the `all-MiniLM-L6-v2` model from HuggingFace's `sentence-transformers` library. This same embedding model is used for both indexing the documents and processing user queries to ensure they are in the same vector space.
+
+4.  **Vector Database (Pinecone)**: The generated embeddings are stored in a Pinecone index, a specialized vector database. This allows for efficient, large-scale similarity searches. The `store_index.py` script handles the creation of the index and the uploading of the document vectors.
+
+5.  **User Query & Similarity Search**: When a user submits a query, the application embeds the query using the same HuggingFace model. It then queries the Pinecone database to retrieve the document chunks with embeddings that are most semantically similar to the query's embedding. This is the "Retrieval" part of RAG.
+
+6.  **LLM (OpenAI GPT)**: The retrieved document chunks (the context) and the original user query are combined into a single prompt. This project uses a custom prompt template defined in `src/prompt.py`. The combined prompt is then sent to an OpenAI GPT model (`gpt-5-mini`).
+
+7.  **Generated Response**: The LLM synthesizes the information from the retrieved context to generate a relevant and coherent answer to the user's query. This answer is then sent back to the user through the Flask API.
+
 ## Key Features
 
 - **PDF Document Processing**: Automatically extracts and chunks technical documentation
