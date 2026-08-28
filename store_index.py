@@ -1,42 +1,23 @@
 from dotenv import load_dotenv
-import os
-from langchain_pinecone import PineconeVectorStore
-from src.helper import (
-    load_pdf_file,
-    filter_to_minimal_docs,
-    text_split,
-    download_embeddings,
-)
-from pinecone import Pinecone
-from pinecone import ServerlessSpec
+from src.helper import load_pdf_file, filter_to_minimal_docs, text_split
+from src.vector_store import ingest_documents, clear_collection
 
 load_dotenv()
 
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-
 extracted_data = load_pdf_file(data="data/")
-filter_data = filter_to_minimal_docs(extracted_data)
-text_chunks = text_split(filter_data)
+filtered_data = filter_to_minimal_docs(extracted_data)
+text_chunks = text_split(filtered_data)
 
-embeddings = download_embeddings()
+print(f"Loaded {len(extracted_data)} pages, split into {len(text_chunks)} chunks")
 
-pinecone_api_key = PINECONE_API_KEY
-pc = Pinecone(api_key=pinecone_api_key)
+for chunk in text_chunks[:3]:
+    print(f"  Chunk ({len(chunk.page_content)} chars): {chunk.page_content[:80]}...")
+    print(f"  Metadata: {chunk.metadata}")
 
-index_name = "medical-lab-chatbot"
-if not pc.has_index(index_name):
-    pc.create_index(
-        name=index_name,
-        dimension=384,
-        metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-    )
+print("Clearing existing documents...")
+deleted = clear_collection()
+print(f"  Deleted {deleted} existing documents")
 
-index = pc.Index(index_name)
-docsearch = PineconeVectorStore.from_documents(
-    documents=text_chunks, embedding=embeddings, index_name=index_name
-)
+print(f"Ingesting {len(text_chunks)} chunks into Firestore...")
+ingested = ingest_documents(text_chunks)
+print(f"Done. {ingested} chunks ingested.")

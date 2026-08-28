@@ -1,66 +1,103 @@
-from flask import Flask, send_from_directory, request, jsonify
-from flask_cors import CORS
-from src.helper import download_embeddings
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import ChatOpenAI
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+from agent import root_agent as agent
 from dotenv import load_dotenv
-from src.prompt import *
-import os
-
-
-app = Flask(__name__, static_folder='frontend/build', static_url_path='')
-CORS(app)
-
+import json
+import uuid
 
 load_dotenv()
 
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+runner = None
+session_service = None
+APP_NAME = "medical_chat"
 
 
-embeddings = download_embeddings()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global runner, session_service
+    session_service = InMemorySessionService()
+    runner = Runner(
+        agent=agent,
+        app_name=APP_NAME,
+        session_service=session_service,
+    )
+    print("ADK agent ready")
+    yield
 
-index_name = "medical-lab-chatbot"
-# Embed each chunk and upsert the embeddings into your Pinecone index.
-docsearch = PineconeVectorStore.from_existing_index(
-    index_name=index_name, embedding=embeddings
+
+app = FastAPI(title="Medical Lab Assistant", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:8080"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
-retriever = docsearch.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-
-chatModel = ChatOpenAI(model="gpt-5-mini")
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system_prompt),
-        ("human", "{input}"),
-    ]
-)
-
-question_answer_chain = create_stuff_documents_chain(chatModel, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+class ChatRequest(BaseModel):
+    msg: str
+    session_id: str | None = None
 
 
-@app.route('/')
-def index():
-    return send_from_directory(app.static_folder, 'index.html')
+class ChatResponse(BaseModel):
+    answer: str
+    session_id: str
 
 
-@app.route("/get", methods=["GET", "POST"])
-def chat():
-    msg = request.form["msg"]
-    input = msg
-    print(input)
-    response = rag_chain.invoke({"input": msg})
-    print("Response : ", response["answer"])
-    return jsonify({"answer": response["answer"]}) # <--- Changed to return JSON
+async def ensure_session(session_id: str):
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id="user", session_id=session_id
+    )
+    if session is None:
+        await session_service.create_session(
+            app_name=APP_NAME, user_id="user", session_id=session_id
+        )
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+@app.post("/get", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    session_id = request.session_id or str(uuid.uuid4())
+    await ensure_session(session_id)
+
+    content = types.Content(role="user", parts=[types.Part(text=request.msg)])
+
+    final_text = ""
+    async for event in runner.run_async(
+        user_id="user", session_id=session_id, new_message=content
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            final_text = event.content.parts[0].text
+
+    return ChatResponse(answer=final_text, session_id=session_id)
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    session_id = request.session_id or str(uuid.uuid4())
+    await ensure_session(session_id)
+
+    content = types.Content(role="user", parts=[types.Part(text=request.msg)])
+
+    async def generate():
+        async for event in runner.run_async(
+            user_id="user", session_id=session_id, new_message=content
+        ):
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    if part.text:
+                        yield f"data: {json.dumps({'token': part.text})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+app.mount("/", StaticFiles(directory="frontend/build", html=True), name="static")

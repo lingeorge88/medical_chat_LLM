@@ -1,93 +1,186 @@
-# Medical Chatbot LLM
-![screenshot](./resources/ragchat.png)
-## Overview
-A concept application designed specifically for medical laboratory environments, leveraging Large Language Models (LLMs) to provide intelligent, context-aware responses to complex procedural and technical queries.
+# Medical Lab Assistant
 
-## Problem Statement
-
-Traditional keyword-based document searches are fundamentally limited in medical laboratory contexts, where:
-
-- **Complex Procedures**: Laboratory protocols often involve multi-step processes that can't be adequately described with simple keywords
-- **Technical Terminology**: Medical and laboratory jargon varies significantly across institutions and equipment manufacturers
-- **Context Dependencies**: The relevance of information often depends on specific sample types, reagent combinations, or equipment states
-- **Limited Search Results**: Keyword searches return exact matches only, missing related procedures, troubleshooting steps, or alternative methods
-- **User Experience**: Laboratory technicians need quick, accurate answers without sifting through irrelevant search results
-
-## Solution
-
-This project implements a Retrieval-Augmented Generation (RAG) system that:
-
-1. **Semantic Understanding**: Uses advanced embeddings to understand the meaning behind questions, not just keyword matches
-2. **Context-Aware Retrieval**: Retrieves relevant documentation based on semantic similarity and context
-3. **Intelligent Responses**: Generates human-like answers that synthesize information from multiple sources
-4. **Continuous Learning**: Can be updated with new documentation without retraining the entire system
+An agentic RAG chatbot for medical laboratory environments, powered by Google's Agent Development Kit (ADK) and Gemini 2.5 Flash. The agent intelligently routes queries between a local IFU knowledge base, web search, and clarification — providing accurate, sourced answers for laboratory technicians and medical professionals.
 
 ## Architecture
 
-```mermaid
-graph TD
-    A[Information Storage <br/>(PDF Documents)] --> B(Chunking);
-    B --> C{Transformers <br/>(Sentence Embeddings)};
-    C --> D[Vector Database <br/>(Pinecone)];
-    E[User Query] --> F{Transformers <br/>(Sentence Embeddings)};
-    F --> G(Similarity Search);
-    D -- Retrieved Context --> G;
-    G --> H[LLM <br/>(OpenAI GPT)];
-    E -- Original Query --> H;
-    H --> I[Generated Response];
+```
++---------------+         +--------------------------------------------+
+|  React UI     |-------->|  FastAPI on Cloud Run                      |
+|  (static)     |  SSE    |                                            |
++---------------+         |  +----------------------------------------+|
+                          |  |  ADK LlmAgent (Gemini 2.5 Flash)       ||
+                          |  |                                         ||
+                          |  |  Tool 1: RAG Search                     ||
+                          |  |    - Firestore vector search (2048d)    ||
+                          |  |    - BM25 hybrid retrieval              ||
+                          |  |    - BGE cross-encoder reranking        ||
+                          |  |                                         ||
+                          |  |  Tool 2: Web Search                     ||
+                          |  |    - Tavily Search API                  ||
+                          |  |                                         ||
+                          |  |  Tool 3: Clarification                  ||
+                          |  |    - Ask user for more info             ||
+                          |  +----------------------------------------+|
+                          |                                            |
+                          |  Firestore: vectors + chat sessions        |
+                          +--------------------------------------------+
 ```
 
-1.  **Information Storage (PDF Documents)**: The process begins with storing the knowledge base, which consists of PDF documents, in the `data/` directory. The `PyPDFLoader` from LangChain is used to load these documents into memory.
+### How It Works
 
-2.  **Chunking**: The loaded documents are then broken down into smaller, manageable chunks. This is achieved using LangChain's `RecursiveCharacterTextSplitter`, which splits the text to ensure that no single chunk is too large for the model's context window, while maintaining semantic coherence.
+1. **User sends a query** via the React frontend
+2. **ADK agent decides** which tool to use based on the query
+3. **RAG Search**: Embeds the query (Gemini Embedding 2048d), performs hybrid retrieval (dense + BM25), reranks with BGE cross-encoder, returns top 5 passages with source citations
+4. **Web Search**: If the KB doesn't have the answer, the agent searches the web via Tavily
+5. **Clarification**: If the query is too vague, the agent asks for more details
+6. **Agent generates response** using retrieved context, citing sources
 
-3.  **Transformers (Sentence Embeddings)**: Each text chunk is converted into a numerical vector representation (embedding). This project uses the `all-MiniLM-L6-v2` model from HuggingFace's `sentence-transformers` library. This same embedding model is used for both indexing the documents and processing user queries to ensure they are in the same vector space.
+### RAG Pipeline
 
-4.  **Vector Database (Pinecone)**: The generated embeddings are stored in a Pinecone index, a specialized vector database. This allows for efficient, large-scale similarity searches. The `store_index.py` script handles the creation of the index and the uploading of the document vectors.
+```
+Query -> Gemini Embedding (2048d) -> Firestore vector search (top 20)
+                                   + BM25 keyword search (top 20)
+                                   -> Merge & deduplicate
+                                   -> BGE Reranker v2-m3 (top 5)
+                                   -> Agent generates response
+```
 
-5.  **User Query & Similarity Search**: When a user submits a query, the application embeds the query using the same HuggingFace model. It then queries the Pinecone database to retrieve the document chunks with embeddings that are most semantically similar to the query's embedding. This is the "Retrieval" part of RAG.
+## Tech Stack
 
-6.  **LLM (OpenAI GPT)**: The retrieved document chunks (the context) and the original user query are combined into a single prompt. This project uses a custom prompt template defined in `src/prompt.py`. The combined prompt is then sent to an OpenAI GPT model (`gpt-5-mini`).
+| Layer | Technology |
+|---|---|
+| LLM | Gemini 2.5 Flash (Vertex AI) |
+| Embedding | Gemini Embedding 001 (2048d) |
+| Vector Store | Firestore (native vector search) |
+| Reranker | BAAI/bge-reranker-v2-m3 |
+| Agent Framework | Google ADK 2.8.0 |
+| Web Search | Tavily Search API |
+| Backend | FastAPI + Uvicorn |
+| Frontend | React 19 + Material UI |
+| Deployment | Google Cloud Run |
 
-7.  **Generated Response**: The LLM synthesizes the information from the retrieved context to generate a relevant and coherent answer to the user's query. This answer is then sent back to the user through the Flask API.
+## Getting Started
 
-## Key Features
+### Prerequisites
 
-- **PDF Document Processing**: Automatically extracts and chunks technical documentation
-- **Vector Database**: Stores document embeddings in Pinecone for fast similarity search
-- **LLM Integration**: Uses OpenAI's GPT models for natural language understanding and response generation
-- **Medical Domain Expertise**: Specialized prompts for medical laboratory equipment and procedures
-- **Scalable Architecture**: Easy to add new documents and update existing knowledge base
+- Python 3.12+
+- Node.js 18+
+- Google Cloud account with Vertex AI enabled
+- Tavily API key (free tier: 1,000 searches/month)
+
+### Setup
+
+```bash
+# Clone the repo
+git clone git@github.com:lingeorge88/medical_chat_LLM.git
+cd medical_chat_LLM
+
+# Create virtual environment
+python3.12 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up GCP authentication
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable aiplatform.googleapis.com firestore.googleapis.com
+```
+
+### Environment Variables
+
+Create a `.env` file:
+
+```env
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GOOGLE_CLOUD_LOCATION=us-west1
+GOOGLE_GENAI_USE_VERTEXAI=True
+TAVILY_API_KEY=your-tavily-api-key
+```
+
+### Document Ingestion
+
+Place PDF files in the `data/` directory, then run:
+
+```bash
+# Create Firestore vector index (one-time)
+gcloud firestore indexes composite create \
+  --collection-group=medical_chunks \
+  --field-config=vector-config='{"dimension":"2048","flat":{}}',field-path=embedding
+
+# Ingest documents
+python store_index.py
+```
+
+### Local Development
+
+```bash
+# Test with ADK Web UI (shows tool routing, reasoning traces)
+adk web .
+# Open http://localhost:8000
+
+# Or run the FastAPI backend
+uvicorn app:app --reload --port 8080
+
+# Frontend (separate terminal)
+cd frontend
+REACT_APP_API_URL=http://localhost:8080 npm start
+```
+
+### Deployment (Cloud Run)
+
+```bash
+# Build and deploy
+gcloud run deploy medical-chatbot \
+  --source . \
+  --region us-west1 \
+  --allow-unauthenticated \
+  --set-secrets=TAVILY_API_KEY=TAVILY_API_KEY:latest \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=us-west1,GOOGLE_GENAI_USE_VERTEXAI=True \
+  --memory=2Gi \
+  --cpu=1 \
+  --min-instances=0 \
+  --max-instances=3
+```
+
+## Project Structure
+
+```
+medical_chat_LLM/
+├── agent.py              # ADK agent definition (3 tools, routing logic)
+├── app.py                # FastAPI backend (endpoints, session management)
+├── store_index.py        # Document ingestion pipeline
+├── src/
+│   ├── helper.py         # Embeddings, BM25, reranker utilities
+│   └── vector_store.py   # Firestore vector search operations
+├── data/                 # PDF documents (IFU manuals)
+├── frontend/             # React frontend (Material UI)
+├── Dockerfile            # Container build
+├── Procfile              # Cloud Run process definition
+└── requirements.txt      # Python dependencies
+```
+
+## Estimated Cost
+
+| Service | Monthly Cost |
+|---|---|
+| Cloud Run | $0 (free tier) |
+| Firestore | $0 (free tier) |
+| Gemini 2.5 Flash | ~$1-5 |
+| Vertex AI Embeddings | ~$0.01 |
+| Tavily | $0 (free tier) |
+| **Total** | **~$1-5/month** |
 
 ## Use Cases
 
 - **Equipment Troubleshooting**: Quick answers to analyzer errors and maintenance procedures
 - **Protocol Guidance**: Step-by-step instructions for complex laboratory procedures
-- **Quality Control**: Information about QC profiles, calibration procedures, and validation
-- **Training Support**: On-demand reference for laboratory technicians and staff
+- **Quality Control**: Information about QC profiles, calibration, and validation
+- **Training Support**: On-demand reference for laboratory technicians
+- **Research**: Web search fallback for FDA guidelines, best practices, and industry standards
 
-## Technology Stack
+## License
 
-- **LangChain**: Framework for building LLM applications
-- **Pinecone**: Vector database for semantic search
-- **OpenAI GPT**: Large language model for natural language processing
-- **HuggingFace**: Sentence transformers for document embeddings
-- **PyPDF**: PDF text extraction and processing
-
-## Getting Started
-Live Demo: https://rag-medlab-frontend.onrender.com/
-
-To test locally and upload your own knowledge base: 
-
-1. Install dependencies: `pip install -r requirements.txt`
-2. Set up environment variables for API keys
-3. Place PDF documentation in the `data/` directory
-4. Run the notebook to process documents and build the knowledge base
-5. Use the chatbot interface for queries
-
-## Future Enhancements
-
-- Faster response time
-- Integration with laboratory information systems
-- Real-time document updates
-- User feedback and response quality tracking
+Apache License 2.0

@@ -13,6 +13,14 @@ function ChatContainer() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(() => {
+    let id = localStorage.getItem('chat_session_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('chat_session_id', id);
+    }
+    return id;
+  });
 
   // Use environment variable for API URL
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
@@ -40,9 +48,9 @@ function ChatContainer() {
       const response = await fetch(`${API_URL}/get`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: `msg=${userMessage.text}`,
+        body: JSON.stringify({ msg: userMessage.text, session_id: sessionId }),
       });
       const data = await response.json(); // <--- Changed to parse as JSON
       const botMessage = {
