@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box } from '@mui/material';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
@@ -8,12 +8,12 @@ function ChatContainer() {
     {
       text: "Hello! I am your Medical Lab Assistant. I can provide information about medical laboratory equipment, procedures, and diagnostics based on the provided documentation. Ask me anything related to these topics!",
       time: new Date().getHours() + ":" + new Date().getMinutes(),
-      sender: 'bot' // Keep sender as 'bot' for internal logic/styling
+      sender: 'bot'
     }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() => {
+  const [sessionId] = useState(() => {
     let id = localStorage.getItem('chat_session_id');
     if (!id) {
       id = crypto.randomUUID();
@@ -22,55 +22,84 @@ function ChatContainer() {
     return id;
   });
 
-  // Use environment variable for API URL
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
-  const handleSend = async (e) => {
+  const handleSend = useCallback(async (e) => {
     e.preventDefault();
-    if (input.trim() === '') return;
+    if (input.trim() === '' || loading) return;
 
-    const date = new Date();
-    const hour = date.getHours();
-    const minute = date.getMinutes();
-    const str_time = hour + ":" + minute;
+    const now = new Date();
+    const str_time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, '0');
 
-    const userMessage = {
-      text: input,
-      time: str_time,
-      sender: 'user'
-    };
+    const userMessage = { text: input, time: str_time, sender: 'user' };
+    const botMessage = { text: '', time: str_time, sender: 'bot', streaming: true };
 
-    setMessages(prevMessages => [...prevMessages, userMessage]);
-    setInput(''); // Clear input immediately after sending
-    setLoading(true); // Set loading to true before API call
+    setMessages(prev => [...prev, userMessage, botMessage]);
+    setInput('');
+    setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/get`, {
+      const response = await fetch(`${API_URL}/chat/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ msg: userMessage.text, session_id: sessionId }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg: input, session_id: sessionId }),
       });
-      const data = await response.json(); // <--- Changed to parse as JSON
-      const botMessage = {
-        text: data.answer, // <--- Access the 'answer' key
-        time: str_time,
-        sender: 'bot'
-      };
-      setMessages(prevMessages => [...prevMessages, botMessage]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const data = JSON.parse(line.slice(6));
+              accumulated += data.token;
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...updated[updated.length - 1],
+                  text: accumulated,
+                };
+                return updated;
+              });
+            } catch {
+              // skip malformed SSE lines
+            }
+          }
+        }
+      }
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          streaming: false,
+        };
+        return updated;
+      });
     } catch (error) {
       console.error("Error fetching response:", error);
-      const errorMessage = {
-        text: "Sorry, something went wrong. Please try again later.",
-        time: str_time,
-        sender: 'bot'
-      };
-      setMessages(prevMessages => [...prevMessages, errorMessage]);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          text: "Sorry, something went wrong. Please try again later.",
+          time: str_time,
+          sender: 'bot',
+          streaming: false,
+        };
+        return updated;
+      });
     } finally {
-      setLoading(false); // Set loading to false after API call (success or error)
+      setLoading(false);
     }
-  };
+  }, [input, loading, sessionId, API_URL]);
 
   return (
     <Box
@@ -78,7 +107,7 @@ function ChatContainer() {
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        width: '100%', // Full width
+        width: '100%',
         margin: '0 auto',
         paddingTop: '20px',
       }}
@@ -94,7 +123,7 @@ function ChatContainer() {
           bottom: 0,
           left: 0,
           right: 0,
-          width: '100%', // Full width
+          width: '100%',
           margin: '0 auto',
           backgroundColor: 'rgba(0,0,0,0.5)',
           padding: '10px 20px',
