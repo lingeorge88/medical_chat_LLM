@@ -1,46 +1,21 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from agent import root_agent as agent
-from dotenv import load_dotenv
 import json
 import uuid
 
-load_dotenv()
+router = APIRouter()
 
 runner = None
 session_service = None
 APP_NAME = "medical_chat"
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def init(r, ss):
     global runner, session_service
-    session_service = InMemorySessionService()
-    runner = Runner(
-        agent=agent,
-        app_name=APP_NAME,
-        session_service=session_service,
-    )
-    print("ADK agent ready")
-    yield
-
-
-app = FastAPI(title="Medical Lab Assistant", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    runner = r
+    session_service = ss
 
 
 class ChatRequest(BaseModel):
@@ -63,7 +38,7 @@ async def ensure_session(session_id: str):
         )
 
 
-@app.post("/get", response_model=ChatResponse)
+@router.post("/get", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     await ensure_session(session_id)
@@ -80,7 +55,7 @@ async def chat(request: ChatRequest):
     return ChatResponse(answer=final_text, session_id=session_id)
 
 
-@app.post("/chat/stream")
+@router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     await ensure_session(session_id)
@@ -98,6 +73,3 @@ async def chat_stream(request: ChatRequest):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-app.mount("/", StaticFiles(directory="frontend/build", html=True), name="static")
