@@ -2,6 +2,7 @@ from google.adk.agents import LlmAgent
 from app.retrieval.legacy_retriever import LegacyRetriever
 from app.search.tavily_search import TavilySearch
 from app.agent.instructions import AGENT_INSTRUCTION
+from app.agent.normalizer import normalize_analyzer
 
 _retriever = LegacyRetriever()
 _web_search = TavilySearch()
@@ -22,7 +23,8 @@ def search_knowledge_base(query: str) -> str:
         Relevant passages from the IFU documentation, or a message indicating
         no results were found (in which case you should use web_search).
     """
-    results = _retriever.search(query, top_k=5)
+    analyzer = normalize_analyzer(query)
+    results = _retriever.search(query, analyzer=analyzer, top_k=5)
 
     if not results:
         return (
@@ -32,7 +34,17 @@ def search_knowledge_base(query: str) -> str:
 
     formatted = []
     for r in results:
-        formatted.append(f"[Source: {r.source}, Page: {r.page}]\n{r.text}")
+        citation_parts = []
+        if r.document_title:
+            citation_parts.append(r.document_title)
+        elif r.source:
+            citation_parts.append(r.source)
+        if r.section:
+            citation_parts.append(f"Section: {r.section}")
+        if r.page is not None:
+            citation_parts.append(f"Page: {r.page}")
+        citation = ", ".join(citation_parts) if citation_parts else "Unknown source"
+        formatted.append(f"[{citation}]\n{r.text}")
 
     output = "\n\n---\n\n".join(formatted)
 

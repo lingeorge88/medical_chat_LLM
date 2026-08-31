@@ -1,18 +1,18 @@
 from google.cloud import firestore
+from google.cloud import discoveryengine_v1 as discoveryengine
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 from google import genai
 from google.genai.types import EmbedContentConfig
 from langchain_community.retrievers import BM25Retriever
 from langchain.schema import Document
-from sentence_transformers import CrossEncoder
 from app.retrieval.interface import RetrievalProvider, SearchResult
 from app import config
 from typing import List
 import hashlib
 
 _genai_client = None
-_reranker = None
+_rank_client = None
 _bm25_retriever = None
 
 
@@ -34,11 +34,11 @@ def _get_firestore_client():
     )
 
 
-def _get_reranker():
-    global _reranker
-    if _reranker is None:
-        _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3")
-    return _reranker
+def _get_rank_client():
+    global _rank_client
+    if _rank_client is None:
+        _rank_client = discoveryengine.RankServiceClient()
+    return _rank_client
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
@@ -113,6 +113,36 @@ def _get_bm25():
     return _bm25_retriever
 
 
+def _vertex_rerank(query: str, docs: List[Document], top_n: int = 5) -> List[tuple[float, Document]]:
+    client = _get_rank_client()
+
+    records = []
+    for i, doc in enumerate(docs):
+        records.append(
+            discoveryengine.RankingRecord(
+                id=str(i),
+                content=doc.page_content[:512],
+            )
+        )
+
+    request = discoveryengine.RankRequest(
+        ranking_config=f"projects/{config.GOOGLE_CLOUD_PROJECT}/locations/global/rankingConfigs/default_ranking_config",
+        model="semantic-ranker-512@latest",
+        query=query,
+        records=records,
+        top_n=top_n,
+    )
+
+    response = client.rank(request=request)
+
+    scored = []
+    for r in response.records:
+        idx = int(r.id)
+        scored.append((r.score, docs[idx]))
+
+    return scored
+
+
 def ingest_documents(chunks: List[Document]) -> int:
     db = _get_firestore_client()
     collection = db.collection(config.FIRESTORE_CHUNKS_COLLECTION)
@@ -152,6 +182,21 @@ def clear_collection():
     return deleted
 
 
+ANALYZER_SOURCE_MAP = {
+    "AU5812": "5812IFU",
+    "AU680": "AU680-IFU",
+    "DXI800": "DXI800IFU",
+}
+
+
+def _filter_by_analyzer(docs: List[Document], analyzer: str) -> List[Document]:
+    source_pattern = ANALYZER_SOURCE_MAP.get(analyzer)
+    if not source_pattern:
+        return docs
+    filtered = [d for d in docs if source_pattern in (d.metadata.get("source") or "")]
+    return filtered if filtered else docs
+
+
 class LegacyRetriever(RetrievalProvider):
     def search(self, query: str, analyzer: str | None = None, top_k: int = 5) -> List[SearchResult]:
         query_embedding = embed_query(query)
@@ -170,16 +215,16 @@ class LegacyRetriever(RetrievalProvider):
                 seen.add(key)
                 merged.append(doc)
 
+        if analyzer:
+            merged = _filter_by_analyzer(merged, analyzer)
+
         if not merged:
             return []
 
-        reranker = _get_reranker()
-        pairs = [(query, doc.page_content) for doc in merged]
-        scores = reranker.predict(pairs)
-        scored = sorted(zip(scores, merged), key=lambda x: x[0], reverse=True)
+        scored = _vertex_rerank(query, merged, top_n=top_k)
 
         results = []
-        for score, doc in scored[:top_k]:
+        for score, doc in scored:
             results.append(SearchResult(
                 text=doc.page_content,
                 source=doc.metadata.get("source", ""),
