@@ -1,57 +1,44 @@
 import React from 'react';
-import { TextField, Button } from '@mui/material';
+import { TextField, IconButton } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 
-function MessageInput({ input, setInput, handleSend }) {
+function MessageInput({ input, setInput, handleSend, disabled }) {
   return (
-    <form onSubmit={handleSend} style={{ padding: '10px', display: 'flex', alignItems: 'center' }}>
+    <form onSubmit={handleSend} style={{ padding: '4px 0', display: 'flex', alignItems: 'center', width: '100%' }}>
       <TextField
         fullWidth
         variant="outlined"
-        placeholder="Type your message..."
+        size="small"
+        placeholder="Ask about analyzer procedures, maintenance, troubleshooting..."
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        disabled={disabled}
         sx={{
-          marginRight: '5px', // Reduced margin to make TextField wider
+          marginRight: '8px',
           '& .MuiOutlinedInput-root': {
-            borderRadius: '25px', // Rounded corners for the input field
-            backgroundColor: 'rgba(255, 255, 255, 0.1)', // Slightly transparent background
-            color: 'white', // Text color
-            '& fieldset': {
-              borderColor: 'rgba(255, 255, 255, 0.3)', // Border color
-            },
-            '&:hover fieldset': {
-              borderColor: 'rgba(255, 255, 255, 0.5)', // Hover border color
-            },
-            '&.Mui-focused fieldset': {
-              borderColor: '#90caf9', // Focused border color
-            },
+            borderRadius: '12px',
+            backgroundColor: 'transparent',
+            color: 'var(--text-primary)',
+            fontSize: '0.9rem',
+            '& fieldset': { border: 'none' },
           },
-          '& .MuiInputBase-input': {
-            color: 'white', // Input text color
-          },
-          '& .MuiInputLabel-root': {
-            color: 'rgba(255, 255, 255, 0.7)', // Placeholder color
-          },
+          '& .MuiInputBase-input::placeholder': { color: 'var(--text-muted)', opacity: 1 },
         }}
-        aria-label="Type your message"
       />
-      <Button
+      <IconButton
         type="submit"
-        variant="contained"
-        color="primary"
-        endIcon={<SendIcon />}
+        disabled={disabled || !input.trim()}
         sx={{
-          borderRadius: '25px', // Rounded corners for the button
-          padding: '12px 20px',
-          backgroundColor: '#4CAF50', // Green send button
-          '&:hover': {
-            backgroundColor: '#45a049',
-          },
+          backgroundColor: input.trim() ? 'var(--accent)' : 'var(--bg-tertiary)',
+          color: input.trim() ? '#fff' : 'var(--text-muted)',
+          width: 36, height: 36, borderRadius: '10px',
+          '&:hover': { backgroundColor: input.trim() ? 'var(--accent-hover)' : 'var(--bg-tertiary)' },
+          '&.Mui-disabled': { backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' },
+          transition: 'all 0.2s',
         }}
       >
-        Send
-      </Button>
+        <SendIcon sx={{ fontSize: 18 }} />
+      </IconButton>
     </form>
   );
 }

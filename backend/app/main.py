@@ -7,7 +7,13 @@ from app.agent.agent import root_agent
 from app.sessions.service import create_session_service
 from app.api import chat, health
 from app import config
+import logging
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s" if config.ENVIRONMENT == "production" else "%(asctime)s %(levelname)s %(message)s",
+)
 
 
 @asynccontextmanager

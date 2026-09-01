@@ -1,14 +1,47 @@
+:root,
+[data-theme="dark"] {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-tertiary: #242736;
+  --border: #2e3140;
+  --text-primary: #e4e6eb;
+  --text-secondary: #9da3ae;
+  --text-muted: #6b7280;
+  --accent: #4f8ff7;
+  --accent-hover: #3d7ce5;
+  --user-bubble: #2d4a7a;
+  --bot-bubble: #242736;
+  --error: #f87171;
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8f9fb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0f1f4;
+  --border: #dfe1e6;
+  --text-primary: #1a1d27;
+  --text-secondary: #5a6070;
+  --text-muted: #8b90a0;
+  --accent: #3b78e7;
+  --accent-hover: #2d62c7;
+  --user-bubble: #3b78e7;
+  --bot-bubble: #ffffff;
+  --error: #dc2626;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body, html {
   height: 100%;
-  margin: 0;
-  background: rgb(44, 47, 59);
-  background: -webkit-linear-gradient(to right, rgb(40, 59, 34), rgb(54, 60, 70), rgb(32, 32, 43));
-  background: linear-gradient(to right, rgb(38, 51, 61), rgb(50, 55, 65), rgb(33, 33, 78));
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 .App {
@@ -18,29 +51,3 @@ body, html {
   min-height: 100vh;
   width: 100%;
 }
-
-/* General styling for Material-UI components to blend with the dark theme */
-.MuiPaper-root {
-  background-color: rgba(0, 0, 0, 0.4) !important; /* Blends with the background */
-  color: white; /* Default text color for Paper */
-}
-
-.MuiListItemText-primary {
-  color: white; /* Message text color */
-}
-
-.MuiListItemText-secondary {
-  color: rgba(255, 255, 255, 0.7); /* Message time color */
-}
-
-/* Specific styles for chat messages to ensure readability */
-.MuiListItem-root {
-  /* No specific background here, handled by ChatMessage component */
-}
-
-/* Styles for user and bot messages */
-.MuiListItemText-root {
-  /* These are overridden by inline styles in ChatMessage for specific colors */
-}
-
-/* Input field and button styles are handled within MessageInput.js */

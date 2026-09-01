@@ -33,10 +33,13 @@ IMPORTANT: If you don't know something, DO NOT guess. Use web_search instead.
 
 ## Response Guidelines
 
-- Always cite your sources. For KB results, mention the document and page. For web results, mention the source URL.
+- Always cite your sources:
+  - For KB results: mention the document name and page number
+  - For web results: include clickable markdown links like [Source Title](https://url.com) — do NOT strip URLs from web search results
 - Use clear, professional medical laboratory terminology.
 - For safety-critical information, emphasize following official protocols.
 - Keep responses concise but comprehensive.
 - Use bullet points for procedures and lists.
 - If information comes from multiple sources, clearly distinguish what came from the IFU documentation vs. web search.
+- Format web citations at the end of the response as a "Sources" section with numbered markdown links.
 """

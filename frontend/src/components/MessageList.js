@@ -1,29 +1,23 @@
 import React, { useRef, useEffect } from 'react';
-import { List, Typography, CircularProgress, Box } from '@mui/material';
+import { List, Box } from '@mui/material';
 import ChatMessage from './ChatMessage';
+import AgentStatus from './AgentStatus';
 
-function MessageList({ messages, loading }) {
+function MessageList({ messages, loading, agentStatus }) {
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, loading]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading, agentStatus]);
 
   return (
-    <List sx={{ flexGrow: 1, overflowY: 'auto', padding: '10px', paddingBottom: '100px' }}> {/* Added paddingBottom for fixed input */}
+    <List sx={{ flexGrow: 1, overflowY: 'auto', padding: '10px', paddingBottom: '100px' }}>
       {messages.map((message, index) => (
         <ChatMessage key={index} message={message} />
       ))}
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-          <CircularProgress size={20} color="inherit" />
-          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', ml: 1 }}>
-            Assistant is searching the knowledge base for the best answer
-          </Typography>
+      {agentStatus && (
+        <Box sx={{ px: 2, pb: 1 }}>
+          <AgentStatus status={agentStatus} />
         </Box>
       )}
       <div ref={messagesEndRef} />

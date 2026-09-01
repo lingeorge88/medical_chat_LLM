@@ -1798,3 +1798,165 @@ The strongest portfolio narrative is:
 > Built a custom hybrid RAG pipeline to understand retrieval mechanics, then migrated the application to a managed GCP-native retrieval and agent architecture to improve serverless latency, persistence, observability, deployment simplicity, and operational reliability.
 
 The final system should remain a **cloud/software engineering project that applies AI services**, rather than an ML research project.
+
+---
+
+# 23. Implementation Status (as of 2026-08-31)
+
+## Current Architecture
+
+```text
+React UI (dark/light mode, SSE streaming, agent status, quota display)
+  ↓
+FastAPI on localhost (Cloud Run deployment pending)
+  ↓
+ADK LlmAgent (Gemini 2.5 Flash)
+  ├─ search_knowledge_base
+  │    ├─ analyzer alias normalization (deterministic)
+  │    ├─ Firestore vector search (gemini-embedding-001, 2048d)
+  │    ├─ BM25 hybrid search (cached via pickle)
+  │    ├─ analyzer-based document filtering
+  │    └─ Vertex AI Ranking API (semantic-ranker-512@latest)
+  ├─ web_search (Tavily Python SDK)
+  └─ ask_clarification
+  ↓
+Firestore: vectors + sessions + rate limits
+```
+
+## Repository Structure
+
+```text
+backend/
+  app/
+    config.py                    ✅ centralized env config
+    main.py                      ✅ FastAPI app + lifespan
+    api/
+      chat.py                    ✅ /get, /chat/stream, /sessions, /quota
+      health.py                  ✅ /health
+    agent/
+      agent.py                   ✅ LlmAgent + 3 tools
+      instructions.py            ✅ agent system prompt
+      normalizer.py              ✅ analyzer alias normalization
+    retrieval/
+      interface.py               ✅ SearchResult + RetrievalProvider ABC
+      legacy_retriever.py        ✅ Firestore + BM25 + Vertex Ranker
+      managed_retriever.py       ❌ not implemented (stub for Agent Retrieval)
+    search/
+      interface.py               ✅ WebResult + WebSearchProvider ABC
+      tavily_search.py           ✅ Tavily implementation
+      google_grounded_search.py  ❌ not implemented
+    sessions/
+      service.py                 ✅ session factory
+      firestore_session_service.py ✅ custom Firestore sessions
+    rate_limit/
+      service.py                 ✅ Firestore-backed daily/burst/concurrent
+      models.py                  ✅ QuotaState + QuotaResponse
+    observability/
+      events.py                  ✅ SSE event protocol (all types)
+      logging.py                 ⚠️ partial (RequestContext exists, per-stage timings not wired)
+  scripts/
+    ingest.py                    ✅ PDF ingestion + BM25 cache
+  tests/                         ❌ not created
+  Dockerfile                     ⚠️ functional but missing non-root user, .dockerignore
+
+frontend/
+  src/components/
+    ChatContainer.js             ✅ SSE events, dark/light mode, sidebar, quota
+    ChatMessage.js               ✅ markdown rendering, tool usage chips
+    MessageList.js               ✅ scrollable list + agent status
+    MessageInput.js              ✅ styled input
+    AgentStatus.js               ✅ tool execution indicators
+    Sidebar.js                   ✅ chat history drawer
+```
+
+## Phase Completion
+
+| Phase | Goal | Status | Notes |
+|---|---|---|---|
+| 0 | Baseline + repo restructure | ✅ DONE | Modular backend/, retrieval interface, feature flag |
+| 1 | Routing + metadata + citations | ⚠️ PARTIAL | Normalizer ✅, greeting routing ✅, enriched metadata ❌, routing tests ❌ |
+| 2 | Retrieval optimization | ⚠️ PARTIAL | BGE→Vertex Ranker ✅, BM25 cache ✅, Agent Retrieval migration ❌ (too expensive, deferred) |
+| 3 | Persistent sessions | ✅ DONE | Custom Firestore sessions (not managed Agent Platform Sessions) |
+| 4 | Rate limiting | ✅ DONE | Daily 10/24h, burst 3/min, concurrent 1/session, Firestore-backed |
+| 5 | Observability | ⚠️ PARTIAL | SSE events ✅, user-facing status ✅, operator logging skeletal ❌ |
+| 6 | Cloud Run deployment | ❌ NOT DONE | Dockerfile exists, /health exists; missing: Secret Manager, service account, .dockerignore, non-root user, request timeouts, deploy |
+| 7 | Corpus expansion | ❌ NOT DONE | |
+| 8 | Google Search grounding | ❌ NOT DONE | |
+| 9 | Voice input | ❌ NOT DONE | |
+| 10 | Final polish | ⚠️ PARTIAL | Chat sidebar ✅, dark/light mode ✅; CI/CD ❌, monitoring ❌ |
+
+## Key Deviations from Original Design
+
+### Agent Retrieval (RAG Engine) deferred
+
+Research found:
+- Spanner mode: ~$65/month (over budget)
+- Serverless mode: us-central1 only (not available in us-west1)
+
+Decision: keep Firestore + BM25 + Vertex Ranker. Retrieval provider interface allows swap when serverless reaches us-west1. Feature flag `RETRIEVAL_PROVIDER=legacy|managed` is in config.
+
+### Sessions: custom Firestore, not Agent Platform Sessions
+
+Custom `FirestoreSessionService` works and is free. Agent Platform Sessions require a deployed Reasoning Engine resource. Current approach is simpler and meets all requirements.
+
+### Reranking: Vertex Ranking API, not local BGE
+
+BGE cross-encoder (2.27GB) replaced with Vertex AI Ranking API. This removes the largest container dependency and eliminates cold-start model download. Cost: ~$3/month at 100 queries/day.
+
+### Tavily: Python SDK, not MCP
+
+MCP integration had registration issues with ADK 2.8.0. Direct Tavily Python SDK is simpler and more reliable.
+
+## Remaining Work (Priority Order)
+
+### High — Required for deployment
+
+1. **Cloud Run deployment** (Phase 6)
+   - Create dedicated service account with least-privilege IAM
+   - Store TAVILY_API_KEY in Secret Manager
+   - Add .dockerignore
+   - Add non-root user to Dockerfile
+   - Add request timeouts on Vertex AI, Tavily, Firestore calls
+   - Deploy and verify SSE streaming works on Cloud Run
+   - Measure cold/warm latency
+
+2. **Operator logging** (Phase 5 completion)
+   - Wire per-stage timing into RequestContext (routing_ms, retrieval_ms, gemini_ttft_ms)
+   - Add structured log fields (kb_used, web_used, analyzer, status_code)
+   - Verify Cloud Logging receives structured JSON
+
+### Medium — Improves quality
+
+3. **Enriched metadata** (Phase 1 completion)
+   - Parse PDF section headers during ingestion
+   - Store document_title, section, revision in Firestore chunks
+   - Populate SearchResult fields beyond source/page
+   - Display richer citations in responses
+
+4. **Evaluation suite** (Phase 0/7)
+   - Create 30-50 test queries with expected routing and retrieval behavior
+   - Measure retrieval accuracy (correct document in top 5)
+   - Measure routing accuracy (KB vs web vs clarification)
+
+5. **Controlled error handling** (Phase 6)
+   - Graceful fallback when Firestore/Vertex AI/Tavily unavailable
+   - User-friendly error messages instead of raw exceptions
+
+### Low — Future enhancements
+
+6. **Google Search grounding** (Phase 8) — evaluate replacing Tavily
+7. **Voice input** (Phase 9) — Cloud Speech-to-Text
+8. **CI/CD** (Phase 10) — GitHub Actions
+9. **Corpus expansion** (Phase 7) — add more analyzer manuals
+
+## Cost (Current)
+
+| Service | Monthly Cost |
+|---|---|
+| Firestore (vectors + sessions + rate limits) | $0 (free tier) |
+| Gemini 2.5 Flash | ~$1-5 |
+| Vertex AI Embedding | ~$0.01 |
+| Vertex AI Ranking API | ~$1-3 |
+| Cloud Run | $0 (free tier, once deployed) |
+| Tavily | $0 (free tier) |
+| **Total** | **~$2-8/month** |

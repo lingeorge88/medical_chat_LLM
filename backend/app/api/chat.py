@@ -3,6 +3,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from google.genai import types
 from app.rate_limit.service import RateLimitService
+from app.observability.events import (
+    status_event, tool_start_event, tool_result_event,
+    generation_start_event, token_event, done_event, error_event,
+    TOOL_MESSAGES,
+)
+from app.observability.logging import RequestContext
 import hashlib
 import json
 import uuid
@@ -57,6 +63,19 @@ def _quota_dict(state):
     }
 
 
+@router.get("/sessions")
+async def list_sessions():
+    result = await session_service.list_sessions(app_name=APP_NAME, user_id="user")
+    return [
+        {
+            "session_id": s.id,
+            "last_update": s.last_update_time,
+            "message_count": len(s.events) if s.events else 0,
+        }
+        for s in result.sessions
+    ]
+
+
 @router.get("/quota")
 async def get_quota(request: Request, session_id: str = "default"):
     client_id = _get_client_id(request, session_id)
@@ -80,6 +99,7 @@ async def chat(request: Request, body: ChatRequest):
             },
         )
 
+    ctx = RequestContext(session_id=session_id)
     rate_limiter.mark_active(session_id)
     try:
         await ensure_session(session_id)
@@ -92,6 +112,7 @@ async def chat(request: Request, body: ChatRequest):
             if event.is_final_response() and event.content and event.content.parts:
                 final_text = event.content.parts[0].text
 
+        ctx.log_complete()
         return ChatResponse(
             answer=final_text,
             session_id=session_id,
@@ -122,15 +143,37 @@ async def chat_stream(request: Request, body: ChatRequest):
     content = types.Content(role="user", parts=[types.Part(text=body.msg)])
 
     async def generate():
+        ctx = RequestContext(session_id=session_id)
+        tools_used = []
+        generating = False
+
         try:
+            yield status_event("Understanding your request…")
+
             async for event in runner.run_async(
                 user_id="user", session_id=session_id, new_message=content
             ):
+                if hasattr(event, "actions") and event.actions:
+                    for action in event.actions.function_calls if hasattr(event.actions, "function_calls") and event.actions.function_calls else []:
+                        tool_name = action.name if hasattr(action, "name") else str(action)
+                        if tool_name not in tools_used:
+                            tools_used.append(tool_name)
+                            ctx.tools_used.append(tool_name)
+                            message = TOOL_MESSAGES.get(tool_name, f"Using {tool_name}…")
+                            yield tool_start_event(tool_name, message)
+
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         if part.text:
-                            yield f"data: {json.dumps({'token': part.text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'quota': _quota_dict(quota_result.state)})}\n\n"
+                            if not generating and event.is_final_response():
+                                generating = True
+                                yield generation_start_event()
+                            yield token_event(part.text)
+
+            ctx.log_complete()
+            yield done_event(tools_used, _quota_dict(quota_result.state))
+        except Exception as e:
+            yield error_event(str(e))
         finally:
             rate_limiter.mark_done(session_id)
 
