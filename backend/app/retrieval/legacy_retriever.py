@@ -10,6 +10,10 @@ from app.retrieval.interface import RetrievalProvider, SearchResult
 from app import config
 from typing import List
 import hashlib
+import pickle
+import os
+
+BM25_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "bm25_cache.pkl")
 
 _genai_client = None
 _rank_client = None
@@ -104,12 +108,28 @@ def load_all_documents() -> List[Document]:
     return docs
 
 
+def save_bm25_cache(chunks: List[Document]):
+    data = [{"text": c.page_content, "source": c.metadata.get("source"), "page": c.metadata.get("page")} for c in chunks]
+    with open(BM25_CACHE_PATH, "wb") as f:
+        pickle.dump(data, f)
+    print(f"BM25 cache saved ({len(data)} chunks) to {BM25_CACHE_PATH}")
+
+
 def _get_bm25():
     global _bm25_retriever
     if _bm25_retriever is None:
-        chunks = load_all_documents()
-        _bm25_retriever = BM25Retriever.from_documents(chunks, k=20)
-        print(f"BM25 index cached with {len(chunks)} chunks")
+        if os.path.exists(BM25_CACHE_PATH):
+            import time
+            t = time.time()
+            with open(BM25_CACHE_PATH, "rb") as f:
+                data = pickle.load(f)
+            chunks = [Document(page_content=d["text"], metadata={"source": d["source"], "page": d["page"]}) for d in data]
+            _bm25_retriever = BM25Retriever.from_documents(chunks, k=20)
+            print(f"BM25 loaded from cache ({len(chunks)} chunks) in {time.time()-t:.2f}s")
+        else:
+            chunks = load_all_documents()
+            _bm25_retriever = BM25Retriever.from_documents(chunks, k=20)
+            print(f"BM25 built from Firestore ({len(chunks)} chunks) — run ingestion to create cache")
     return _bm25_retriever
 
 

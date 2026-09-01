@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from app.retrieval.legacy_retriever import ingest_documents, clear_collection
+from app.retrieval.legacy_retriever import ingest_documents, clear_collection, save_bm25_cache
 from typing import List
 
 load_dotenv()
@@ -63,6 +63,10 @@ def main():
 
     print(f"Ingesting {len(chunks)} chunks into Firestore...")
     ingested = ingest_documents(chunks)
+
+    print("Saving BM25 cache...")
+    save_bm25_cache(chunks)
+
     print(f"Done. {ingested} chunks ingested.")
 
 

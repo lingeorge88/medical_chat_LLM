@@ -1,6 +1,5 @@
-from google.adk.sessions import InMemorySessionService
-from app import config
+from app.sessions.firestore_session_service import FirestoreSessionService
 
 
 def create_session_service():
-    return InMemorySessionService()
+    return FirestoreSessionService()
