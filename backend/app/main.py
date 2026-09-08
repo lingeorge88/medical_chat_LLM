@@ -11,7 +11,7 @@ import logging
 import os
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
     format="%(message)s" if config.ENVIRONMENT == "production" else "%(asctime)s %(levelname)s %(message)s",
 )
 
@@ -31,9 +31,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Medical Lab Assistant", lifespan=lifespan)
 
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080", "*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

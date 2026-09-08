@@ -3,6 +3,10 @@ from app.retrieval.legacy_retriever import LegacyRetriever
 from app.search.tavily_search import TavilySearch
 from app.agent.instructions import AGENT_INSTRUCTION
 from app.agent.normalizer import normalize_analyzer
+from app import config
+import logging
+
+logger = logging.getLogger("medical_chat")
 
 _retriever = LegacyRetriever()
 _web_search = TavilySearch()
@@ -23,8 +27,15 @@ def search_knowledge_base(query: str) -> str:
         Relevant passages from the IFU documentation, or a message indicating
         no results were found (in which case you should use web_search).
     """
-    analyzer = normalize_analyzer(query)
-    results = _retriever.search(query, analyzer=analyzer, top_k=5)
+    try:
+        analyzer = normalize_analyzer(query)
+        results = _retriever.search(query, analyzer=analyzer, top_k=5)
+    except Exception as e:
+        logger.error(f"Knowledge base search failed: {type(e).__name__}: {e}")
+        return (
+            "The knowledge base is temporarily unavailable. "
+            "You should use web_search to find the answer from the web instead."
+        )
 
     if not results:
         return (
@@ -73,7 +84,15 @@ def web_search(query: str) -> str:
     Returns:
         Relevant information from web sources with URLs.
     """
-    results = _web_search.search(query, max_results=5)
+    try:
+        results = _web_search.search(query, max_results=5)
+    except Exception as e:
+        logger.error(f"Web search failed: {type(e).__name__}: {e}")
+        return (
+            "Web search is temporarily unavailable. "
+            "Please answer based on knowledge base results if available, "
+            "or let the user know that external sources could not be reached."
+        )
 
     if not results:
         return "No web results found for this query."
@@ -102,7 +121,7 @@ def ask_clarification(question: str) -> str:
 
 
 root_agent = LlmAgent(
-    model="gemini-2.5-flash",
+    model=config.GEMINI_MODEL,
     name="medical_assistant",
     description="Medical laboratory analyzer specialist with access to IFU documentation and web search.",
     instruction=AGENT_INSTRUCTION,

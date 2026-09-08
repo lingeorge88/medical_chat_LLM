@@ -8,7 +8,9 @@ from app.observability.events import (
     generation_start_event, token_event, done_event, error_event,
     TOOL_MESSAGES,
 )
-from app.observability.logging import RequestContext
+from app.observability.logging import RequestContext, logger
+from app import config
+import asyncio
 import hashlib
 import json
 import uuid
@@ -63,6 +65,15 @@ def _quota_dict(state):
     }
 
 
+def _track_tool(ctx: RequestContext, tool_name: str):
+    if tool_name == "search_knowledge_base":
+        ctx.kb_used = True
+    elif tool_name == "web_search":
+        ctx.web_used = True
+    elif tool_name == "ask_clarification":
+        ctx.clarification_used = True
+
+
 @router.get("/sessions")
 async def list_sessions():
     result = await session_service.list_sessions(app_name=APP_NAME, user_id="user")
@@ -106,17 +117,42 @@ async def chat(request: Request, body: ChatRequest):
         content = types.Content(role="user", parts=[types.Part(text=body.msg)])
 
         final_text = ""
-        async for event in runner.run_async(
-            user_id="user", session_id=session_id, new_message=content
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                final_text = event.content.parts[0].text
+        async with asyncio.timeout(config.GENERATION_TIMEOUT):
+            async for event in runner.run_async(
+                user_id="user", session_id=session_id, new_message=content
+            ):
+                if hasattr(event, "actions") and event.actions:
+                    for action in event.actions.function_calls if hasattr(event.actions, "function_calls") and event.actions.function_calls else []:
+                        tool_name = action.name if hasattr(action, "name") else str(action)
+                        if tool_name not in ctx.tools_used:
+                            ctx.tools_used.append(tool_name)
+                            _track_tool(ctx, tool_name)
+
+                if event.is_final_response() and event.content and event.content.parts:
+                    final_text = event.content.parts[0].text
 
         ctx.log_complete()
         return ChatResponse(
             answer=final_text,
             session_id=session_id,
             quota=_quota_dict(quota_result.state),
+        )
+    except TimeoutError:
+        ctx.status_code = 504
+        ctx.error_type = "timeout"
+        ctx.log_complete()
+        return JSONResponse(
+            status_code=504,
+            content={"error": "timeout", "message": "Request timed out. Please try again."},
+        )
+    except Exception as e:
+        ctx.status_code = 500
+        ctx.error_type = type(e).__name__
+        ctx.log_complete()
+        logger.exception(f"Chat error: request_id={ctx.request_id}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Something went wrong. Please try again."},
         )
     finally:
         rate_limiter.mark_done(session_id)
@@ -150,31 +186,47 @@ async def chat_stream(request: Request, body: ChatRequest):
         try:
             yield status_event("Understanding your request…")
 
-            async for event in runner.run_async(
-                user_id="user", session_id=session_id, new_message=content
-            ):
-                if hasattr(event, "actions") and event.actions:
-                    for action in event.actions.function_calls if hasattr(event.actions, "function_calls") and event.actions.function_calls else []:
-                        tool_name = action.name if hasattr(action, "name") else str(action)
-                        if tool_name not in tools_used:
-                            tools_used.append(tool_name)
-                            ctx.tools_used.append(tool_name)
-                            message = TOOL_MESSAGES.get(tool_name, f"Using {tool_name}…")
-                            yield tool_start_event(tool_name, message)
+            async with asyncio.timeout(config.GENERATION_TIMEOUT):
+                async for event in runner.run_async(
+                    user_id="user", session_id=session_id, new_message=content
+                ):
+                    if hasattr(event, "actions") and event.actions:
+                        for action in event.actions.function_calls if hasattr(event.actions, "function_calls") and event.actions.function_calls else []:
+                            tool_name = action.name if hasattr(action, "name") else str(action)
+                            if tool_name not in tools_used:
+                                tools_used.append(tool_name)
+                                ctx.tools_used.append(tool_name)
+                                _track_tool(ctx, tool_name)
+                                message = TOOL_MESSAGES.get(tool_name, f"Using {tool_name}…")
+                                yield tool_start_event(tool_name, message)
 
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            if not generating and event.is_final_response():
-                                generating = True
-                                yield generation_start_event()
-                            yield token_event(part.text)
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if part.text:
+                                if not generating and event.is_final_response():
+                                    generating = True
+                                    ctx.mark_generation_start()
+                                    yield generation_start_event()
+                                yield token_event(part.text)
 
             ctx.log_complete()
             yield done_event(tools_used, _quota_dict(quota_result.state))
+        except TimeoutError:
+            ctx.status_code = 504
+            ctx.error_type = "timeout"
+            ctx.log_complete()
+            yield error_event("Request timed out. Please try again with a simpler question.")
         except Exception as e:
-            yield error_event(str(e))
+            ctx.status_code = 500
+            ctx.error_type = type(e).__name__
+            ctx.log_complete()
+            logger.exception(f"Stream error: request_id={ctx.request_id}")
+            yield error_event("Something went wrong. Please try again.")
         finally:
             rate_limiter.mark_done(session_id)
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )

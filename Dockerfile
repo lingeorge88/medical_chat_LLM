@@ -9,6 +9,10 @@ COPY backend/ ./backend/
 COPY frontend/build/ ./frontend/build/
 COPY data/ ./data/
 
+RUN adduser --disabled-password --no-create-home --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 WORKDIR /app/backend
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

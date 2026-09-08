@@ -31,7 +31,7 @@ function ChatContainer() {
   });
 
   const accumulatedRef = useRef('');
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+  const API_URL = process.env.REACT_APP_API_URL ?? '';
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');

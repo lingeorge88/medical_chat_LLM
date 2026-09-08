@@ -10,10 +10,22 @@ from app.retrieval.interface import RetrievalProvider, SearchResult
 from app import config
 from typing import List
 import hashlib
+import json
+import logging
 import pickle
 import os
 
-BM25_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "bm25_cache.pkl")
+logger = logging.getLogger("medical_chat")
+
+_DEFAULT_CACHE = os.path.join(os.path.dirname(__file__), "..", "..", "bm25_cache.pkl")
+_TMP_CACHE = "/tmp/bm25_cache.pkl"
+
+if os.path.exists(_DEFAULT_CACHE):
+    BM25_CACHE_PATH = _DEFAULT_CACHE
+elif config.ENVIRONMENT == "production":
+    BM25_CACHE_PATH = _TMP_CACHE
+else:
+    BM25_CACHE_PATH = _DEFAULT_CACHE
 
 _genai_client = None
 _rank_client = None
@@ -76,7 +88,7 @@ def similarity_search(query_embedding: List[float], k: int = 20) -> List[Documen
     )
 
     docs = []
-    for doc in results.stream():
+    for doc in results.stream(timeout=config.RETRIEVAL_TIMEOUT):
         data = doc.to_dict()
         docs.append(
             Document(
@@ -153,7 +165,7 @@ def _vertex_rerank(query: str, docs: List[Document], top_n: int = 5) -> List[tup
         top_n=top_n,
     )
 
-    response = client.rank(request=request)
+    response = client.rank(request=request, timeout=config.RETRIEVAL_TIMEOUT)
 
     scored = []
     for r in response.records:
@@ -219,8 +231,15 @@ def _filter_by_analyzer(docs: List[Document], analyzer: str) -> List[Document]:
 
 class LegacyRetriever(RetrievalProvider):
     def search(self, query: str, analyzer: str | None = None, top_k: int = 5) -> List[SearchResult]:
+        import time as _time
+        t0 = _time.time()
+
         query_embedding = embed_query(query)
+        embed_ms = round((_time.time() - t0) * 1000)
+
+        t1 = _time.time()
         dense_docs = similarity_search(query_embedding, k=20)
+        firestore_ms = round((_time.time() - t1) * 1000)
 
         try:
             bm25_docs = _get_bm25().invoke(query)
@@ -241,7 +260,22 @@ class LegacyRetriever(RetrievalProvider):
         if not merged:
             return []
 
+        t2 = _time.time()
         scored = _vertex_rerank(query, merged, top_n=top_k)
+        rerank_ms = round((_time.time() - t2) * 1000)
+
+        logger.info(json.dumps({
+            "stage": "retrieval",
+            "analyzer": analyzer,
+            "dense_count": len(dense_docs),
+            "bm25_count": len(bm25_docs),
+            "merged_count": len(merged),
+            "reranked_count": len(scored),
+            "embed_ms": embed_ms,
+            "firestore_ms": firestore_ms,
+            "rerank_ms": rerank_ms,
+            "total_ms": round((_time.time() - t0) * 1000),
+        }))
 
         results = []
         for score, doc in scored:

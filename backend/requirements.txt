@@ -2,6 +2,7 @@ google-adk==2.8.0
 google-genai
 google-cloud-firestore
 google-cloud-discoveryengine
+google-cloud-secret-manager
 tavily-python
 fastapi==0.141.1
 uvicorn[standard]
